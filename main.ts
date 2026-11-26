@@ -1,39 +1,66 @@
 // One Word, First Thought — deterministic emitter.
-// Writes the winning word (see selection.md) to /output/entry.txt,
-// then reads it back and checks the gate itself: UTF-8 text, 1-24
-// characters, a single word, not only white space. Nothing is random,
-// nothing is read from the environment: two runs write byte-identical files.
-// The winner is surprising (criterion 2), vivid (criterion 3), and carries
-// a spark of wit in its sound and its literal meaning (criterion 4):
-// throwing something out of a window is an image nobody expects as a
-// first thought, and the word itself sounds like the act.
+//
+// Writes exactly one word to /output/entry.txt, then reads it back and
+// validates the competition gate on the exact bytes: 1-24 code points,
+// exactly one word, letters only, no whitespace, no trailing newline,
+// file mode forced to 0644. No randomness, nothing read from the
+// environment — the same bytes come out on every run.
 
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 
-const LINE = 'defenestration';
+const WORD = "defenestration";
+const OUT = "/output/entry.txt";
 
-const LIMIT = 24;
-const OUT = '/output/entry.txt';
+function fail(message: string): never {
+  console.error(`gate failed: ${message}`);
+  process.exit(1);
+}
 
-const chars = [...LINE].length;
-if (chars < 1 || chars > LIMIT) throw new Error(`entry is ${chars} characters, gate needs 1-${LIMIT}`);
-if (LINE.trim().length === 0) throw new Error('entry is only white space');
-if (LINE.includes('\n')) throw new Error('entry must be a single line');
-if (LINE.trim().split(/\s+/).length !== 1) throw new Error('entry must be exactly one word');
+function validate(text: string): void {
+  const points = [...text];
+  if (points.length < 1 || points.length > 24) {
+    fail(`length ${points.length} code points, must be 1-24`);
+  }
+  if (text.trim().length === 0) {
+    fail("entry is only whitespace");
+  }
+  if (text !== text.trim()) {
+    fail("leading or trailing whitespace");
+  }
+  if (/\s/.test(text)) {
+    fail("more than one word");
+  }
+  if (!/^\p{L}+$/u.test(text)) {
+    fail("not letters only");
+  }
+}
 
-mkdirSync('/output', { recursive: true });
-writeFileSync(OUT, LINE + '\n', 'utf8');
+mkdirSync(dirname(OUT), { recursive: true });
+writeFileSync(OUT, WORD, { encoding: "utf8", mode: 0o644 });
 chmodSync(OUT, 0o644);
 
-const back = readFileSync(OUT, 'utf8');
-if (back !== LINE + '\n') throw new Error('read-back mismatch');
-// Validate what the gate will actually read: the file's body, not just
-// the string in this file. A trailing newline is fine; anything else that
-// pushes the body over the limit or off one line is not.
-const body = back.replace(/\n$/, '');
-const bodyChars = [...body].length;
-if (bodyChars < 1 || bodyChars > LIMIT) throw new Error(`file body is ${bodyChars} characters, gate needs 1-${LIMIT}`);
-if (body.includes('\n')) throw new Error('file body must be a single line');
-if (body.trim().length === 0) throw new Error('file body is only white space');
-if (body.trim().split(/\s+/).length !== 1) throw new Error('file body must be exactly one word');
-console.log(`wrote ${OUT} (${chars} chars)`);
+// Byte-exact check first: reading as a Buffer catches any encoding
+// surprise that a "utf8" string read would silently replace.
+const raw = readFileSync(OUT);
+if (!raw.equals(Buffer.from(WORD, "utf8"))) {
+  fail("written bytes differ from the word");
+}
+if (raw.includes(0x0a) || raw.includes(0x0d)) {
+  fail("entry contains a newline");
+}
+
+const back = raw.toString("utf8");
+if (back !== WORD) {
+  fail("read-back mismatch");
+}
+validate(back);
+
+const mode = statSync(OUT).mode & 0o777;
+if (mode !== 0o644) {
+  fail(`mode ${mode.toString(8)}, expected 644`);
+}
+
+console.log(
+  `wrote ${OUT}: ${WORD} (${[...WORD].length} chars, ${Buffer.byteLength(WORD, "utf8")} bytes, mode 0644)`,
+);

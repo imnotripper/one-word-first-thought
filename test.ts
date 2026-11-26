@@ -1,31 +1,51 @@
-// Tests for the one-word-first-thought emitter: run the program, then
-// check the gate on what it actually wrote.
-import test from 'node:test';
-import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+// Tests for the one-word emitter (node --test test.ts).
+//
+// Gate checks run against the file main.ts actually wrote: strict UTF-8
+// decoding, exact bytes, a single letters-only word, mode 0644, and two
+// runs producing byte-identical output.
 
-const EXPECTED = 'defenestration';
+import test from "node:test";
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { readFileSync, statSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
-test('emitter writes a valid single-word entry', () => {
-  execFileSync(process.execPath, ['main.ts'], { cwd: import.meta.dirname });
-  const text = readFileSync('/output/entry.txt', 'utf8');
-  const body = text.replace(/\n$/, '');
-  assert.equal(body, EXPECTED);
-  assert.ok(!body.includes('\n'), 'must be a single line');
-  assert.equal(body.trim().split(/\s+/).length, 1, 'must be exactly one word');
-  const chars = [...body].length;
-  assert.ok(chars >= 1 && chars <= 24, `gate needs 1-24 chars, got ${chars}`);
-  assert.ok(body.trim().length > 0, 'must not be only white space');
-  // 14 is the emitter's own count for "defenestration"; it must match what
-  // main.ts prints, not a hand count. (Verified on the first emitter run.)
-  assert.equal(chars, 14);
+const OUT = "/output/entry.txt";
+const WORD = "defenestration";
+const MAIN = fileURLToPath(new URL("./main.ts", import.meta.url));
+
+function runEmitter(): void {
+  const result = spawnSync(process.execPath, [MAIN], { encoding: "utf8" });
+  assert.equal(result.status, 0, `main.ts exited ${result.status}: ${result.stderr}`);
+}
+
+test("gate: exact bytes, single word, letters only", () => {
+  runEmitter();
+  const bytes = readFileSync(OUT);
+  assert.deepEqual(bytes, Buffer.from(WORD, "utf8"));
+  const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  assert.equal(text, WORD);
+  assert.ok([...text].length >= 1 && [...text].length <= 24);
+  assert.match(text, /^\p{L}+$/u);
+  assert.equal(text.trim(), text);
 });
 
-test('two runs are byte-identical', () => {
-  execFileSync(process.execPath, ['main.ts'], { cwd: import.meta.dirname });
-  const first = readFileSync('/output/entry.txt');
-  execFileSync(process.execPath, ['main.ts'], { cwd: import.meta.dirname });
-  const second = readFileSync('/output/entry.txt');
+test("file mode is 0644", () => {
+  runEmitter();
+  assert.equal(statSync(OUT).mode & 0o777, 0o644);
+});
+
+test("word is 14 code points and 14 bytes", () => {
+  runEmitter();
+  const bytes = readFileSync(OUT);
+  assert.equal(bytes.length, 14);
+  assert.equal([...new TextDecoder("utf-8", { fatal: true }).decode(bytes)].length, 14);
+});
+
+test("two runs are byte-identical", () => {
+  runEmitter();
+  const first = readFileSync(OUT);
+  runEmitter();
+  const second = readFileSync(OUT);
   assert.deepEqual(first, second);
 });

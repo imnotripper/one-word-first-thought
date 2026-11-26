@@ -1,6 +1,5 @@
-u-0xkianno-one-word-first-thought-106abaf8-kit/
+# Build and bundle artifacts — never committed.
 *.tar.gz
 muse-usage.jsonl
-transcripts.tar.gz
 node_modules/
 __pycache__/
